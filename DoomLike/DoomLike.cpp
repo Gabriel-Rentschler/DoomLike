@@ -1,11 +1,11 @@
-// DoomLike.cpp : Este arquivo contém a função 'main'. A execução do programa começa e termina ali.
-//
+# define M_PI           3.14159265358979323846
 
 #include <iostream>
 #include <fstream>
 #include <vector>
 #include <cstdint>
 #include <cassert>
+
 
 uint32_t pack_color(const uint8_t r, const uint8_t g, const uint8_t b, const uint8_t a = 255) {
     return (a << 24) + (b << 16) + (g << 8) + r;
@@ -54,6 +54,7 @@ int main()
     const float player_x = 2;
     const float player_y = 2;
     const float player_a = 1.523; //player angle view
+    const float fov = M_PI / 3;
 
     const char map[] =  "0000000000000000"\
                         "0          0   0"\
@@ -83,10 +84,6 @@ int main()
         }
     }
 
-    
-
-    //draw_player(framebuffer, win_w, win_h, player_x, player_y, pack_color(255, 255, 255));
-
     const size_t rect_w = win_w / map_w;
     const size_t rect_h = win_h / map_h;
     for (size_t j = 0; j < map_h; j++) { // draw the map
@@ -101,15 +98,20 @@ int main()
     //Draw player on the map
     draw_rectangle(framebuffer, win_w, win_h, player_x*rect_w, player_y*rect_h, 4, 4, pack_color(255, 255, 255));
 
-    for (float c=0; c < 20; c += .05) {
-        float cx = player_x + c * cos(player_a);
-        float cy = player_y + c * sin(player_a);
-        if (map[int(cx) + int(cy) * map_w] != ' ') break;
+    //Draw the fov cone
+    for (float i=0; i < win_w; i++) { 
+        float angle = player_a - fov / 2 + fov * i / float(win_w);
 
-        size_t pix_x = cx * rect_w;
-        size_t pix_y = cy * rect_h;
+        for (float c = 0; c < 20; c += .05) {
+            float cx = player_x + c * cos(angle);
+            float cy = player_y + c * sin(angle);
+            if (map[int(cx) + int(cy) * map_w] != ' ') break;
 
-        framebuffer[pix_x + pix_y * win_w] = pack_color(255, 255, 255);
+            size_t pix_x = cx * rect_w;
+            size_t pix_y = cy * rect_h;
+
+            framebuffer[pix_x + pix_y * win_w] = pack_color(255, 255, 255);
+        }
     }
 
     drop_ppm_image("./out.ppm", framebuffer, win_w, win_h);
