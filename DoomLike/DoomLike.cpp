@@ -8,6 +8,9 @@
 #include <sstream>
 #include <iomanip>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb.h"
+
 
 uint32_t pack_color(const uint8_t r, const uint8_t g, const uint8_t b, const uint8_t a = 255) {
     return (a << 24) + (b << 16) + (g << 8) + r;
@@ -44,25 +47,76 @@ void drop_ppm_image(const std::string filename, const std::vector<uint32_t>& ima
     ofs.close();
 }
 
+bool load_texture(const std::string filename, std::vector<uint32_t>& texture, size_t& text_size, size_t& text_cnt) {
+    int nchannels = -1, w, h;
+    unsigned char* pixmap = stbi_load(filename.c_str(), &w, &h, &nchannels, 0);
+
+    if (!pixmap) {
+        std::cerr << "Error: can not load the textures" << std::endl;
+        return false;
+    }
+
+    if (4 != nchannels) {
+        std::cerr << "Error: the texture must be a 32 bit image" << std::endl;
+        stbi_image_free(pixmap);
+        return false;
+    }
+
+    text_size = 64;
+    text_cnt = w / text_size;
+    //text_cnt = (w / text_size) * (h / text_size); // Get the number of textures in the image based on its dimensions
+    if (4 != nchannels) {
+        std::cerr << "Error: the texture must be a 32 bit image" << std::endl;
+        stbi_image_free(pixmap);
+        return false;
+    }
+
+
+    texture = std::vector<uint32_t>(w * h);
+    for (int j = 0; j < h; j++) {
+        for (int i = 0; i < w; i++) {
+            uint8_t r = pixmap[(i + j * w) * 4 + 0];
+            uint8_t g = pixmap[(i + j * w) * 4 + 1];
+            uint8_t b = pixmap[(i + j * w) * 4 + 2];
+            uint8_t a = pixmap[(i + j * w) * 4 + 3];
+            texture[i + j * w] = pack_color(r, g, b, a);
+        }
+    }
+    stbi_image_free(pixmap);
+    return true;
+}
+
 int main()
 {
     const size_t win_w = 1024; // image width
     const size_t win_h = 512; // image height
     std::vector<uint32_t> framebuffer(win_w * win_h, pack_color(255,255,255)); // the image itself, initialized to red
 
+    //each block size in pixels
     const size_t map_w = 16;
     const size_t map_h = 16;
 
+    //Player coordinates and FOV
     const float player_x = 2;
     const float player_y = 2;
     float player_a = 1.523; //player angle view
     const float fov = M_PI / 3;
 
+    //Colors for each number on the map
     const size_t ncolors = 10;
     std::vector<uint32_t> colors(ncolors);
-
+    //Assigning random values of color for each
     for (size_t i = 0; i < ncolors; i++) {
         colors[i] = pack_color(rand() % 255, rand() % 255, rand() % 255);
+    }
+
+    std::vector<uint32_t> walltext; //texture for the walls
+    size_t walltext_size; //size of the texture (dimension)
+    size_t walltext_cnt;  //Number of textures in the image
+
+    if (!load_texture("../walltext.png", walltext, walltext_size, walltext_cnt)) {
+        std::cerr << "Failed to load textures!" << std::endl;
+        return -1;
     }
 
     const char map[] =  "0000000000022222"\
@@ -88,52 +142,53 @@ int main()
 
     const size_t rect_w = win_w / (map_w * 2);
     const size_t rect_h = win_h / map_h;
-    for (size_t frame = 0; frame < 10; frame++) {
-        std::stringstream ss;
-        ss << std::setfill('0') << std::setw(5) << frame << ".ppm";
-        player_a += 2 * M_PI / 360;
 
-        framebuffer = std::vector<uint32_t>(win_w * win_h, pack_color(255, 255, 255)); // clear the screen
-
-        for (size_t j = 0; j < map_h; j++) { // draw the map
-            for (size_t i = 0; i < map_w; i++) {
-                if (map[i + j * map_w] == ' ') continue; // skip empty spaces
-                size_t rect_x = i * rect_w;
-                size_t rect_y = j * rect_h;
-                size_t icolor = map[i + j * map_w] - '0';
-                assert(icolor < ncolors);
-                draw_rectangle(framebuffer, win_w, win_h, rect_x, rect_y, rect_w, rect_h, colors[icolor]);
-            }
+    for (size_t j = 0; j < map_h; j++) { // draw the map
+        for (size_t i = 0; i < map_w; i++) {
+            if (map[i + j * map_w] == ' ') continue; // skip empty spaces
+            size_t rect_x = i * rect_w;
+            size_t rect_y = j * rect_h;
+            size_t icolor = map[i + j * map_w] - '0';
+            assert(icolor < ncolors);
+            draw_rectangle(framebuffer, win_w, win_h, rect_x, rect_y, rect_w, rect_h, colors[icolor]);
         }
-
-        //Draw player on the map
-        draw_rectangle(framebuffer, win_w, win_h, player_x * rect_w, player_y * rect_h, 4, 4, pack_color(0, 0, 0));
-
-        //Draw the fov cone and the 3D view
-        for (float i = 0; i < win_w / 2; i++) {
-            float angle = player_a - fov / 2 + fov * i / float(win_w / 2);
-
-            for (float c = 0; c < 20; c += .01) {
-                float cx = player_x + c * cos(angle);
-                float cy = player_y + c * sin(angle);
-
-                size_t pix_x = cx * rect_w;
-                size_t pix_y = cy * rect_h;
-
-                framebuffer[pix_x + pix_y * win_w] = pack_color(160, 160, 160);
-
-                if (map[int(cx) + int(cy) * map_w] != ' ') { //happens when the ray touches a wall, drawing the vertical column to create the "3D"
-                    size_t icolor = map[int(cx) + int(cy) * map_w] - '0';
-                    assert(icolor<ncolors);
-                    size_t column_height = win_h / (c * cos(angle - player_a));
-                    draw_rectangle(framebuffer, win_w, win_h, win_w / 2 + i, win_h / 2 - column_height / 2, 1, column_height, colors[icolor]);
-
-                    break;
-                }
-            }
-        }
-
-        drop_ppm_image(ss.str(), framebuffer, win_w, win_h);
     }
+
+    //Draw player on the map
+    draw_rectangle(framebuffer, win_w, win_h, player_x * rect_w, player_y * rect_h, 4, 4, pack_color(0, 0, 0));
+
+    //Draw the fov cone and the 3D view
+    for (float i = 0; i < win_w / 2; i++) {
+        float angle = player_a - fov / 2 + fov * i / float(win_w / 2);
+
+        for (float c = 0; c < 20; c += .01) {
+            float cx = player_x + c * cos(angle);
+            float cy = player_y + c * sin(angle);
+
+            size_t pix_x = cx * rect_w;
+            size_t pix_y = cy * rect_h;
+
+            framebuffer[pix_x + pix_y * win_w] = pack_color(160, 160, 160);
+
+            if (map[int(cx) + int(cy) * map_w] != ' ') { //happens when the ray touches a wall, drawing the vertical column to create the "3D"
+                size_t icolor = map[int(cx) + int(cy) * map_w] - '0';
+                assert(icolor<ncolors);
+                size_t column_height = win_h / (c * cos(angle - player_a));
+                draw_rectangle(framebuffer, win_w, win_h, win_w / 2 + i, win_h / 2 - column_height / 2, 1, column_height, colors[icolor]);
+
+                break;
+            }
+        }
+    }
+
+    const size_t texid = 4; // draw the 4th texture on the screen
+    for (size_t i = 0; i < walltext_size; i++) {
+        for (size_t j = 0; j < walltext_size; j++) {
+            framebuffer[i + j * win_w] = walltext[i + texid * walltext_size + j * walltext_size * walltext_cnt];
+        }
+    }
+
+    drop_ppm_image("./out_with_textures.ppm", framebuffer, win_w, win_h);
+    
     return 0;
 }
