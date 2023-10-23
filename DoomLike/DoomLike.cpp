@@ -86,6 +86,19 @@ bool load_texture(const std::string filename, std::vector<uint32_t>& texture, si
     return true;
 }
 
+std::vector<uint32_t> texture_column(const std::vector<uint32_t>& img, const size_t texsize, const size_t ntextures, const size_t texid, const size_t texcoord, const size_t column_height) {
+    const size_t img_w = texsize * ntextures;
+    const size_t img_h = texsize;
+    assert(img.size() == img_w * img_h && texcoord < texsize&& texid < ntextures);
+    std::vector<uint32_t> column(column_height);
+    for (size_t y = 0; y < column_height; y++) {
+        size_t pix_x = texid * texsize + texcoord;
+        size_t pix_y = (y * texsize) / column_height;
+        column[y] = img[pix_x + pix_y * img_w];
+    }
+    return column;
+}
+
 int main()
 {
     const size_t win_w = 1024; // image width
@@ -159,8 +172,8 @@ int main()
             float cx = player_x + c * cos(angle);
             float cy = player_y + c * sin(angle);
 
-            size_t pix_x = cx * rect_w;
-            size_t pix_y = cy * rect_h;
+            int pix_x = cx * rect_w;
+            int pix_y = cy * rect_h;
 
             framebuffer[pix_x + pix_y * win_w] = pack_color(160, 160, 160);
 
@@ -168,7 +181,27 @@ int main()
                 size_t texid = map[int(cx) + int(cy) * map_w] - '0';
                 assert(texid < walltext_cnt);
                 size_t column_height = win_h / (c * cos(angle - player_a));
-                draw_rectangle(framebuffer, win_w, win_h, win_w / 2 + i, win_h / 2 - column_height / 2, 1, column_height, walltext[texid * walltext_size]);
+
+                float hitx = cx - floor(cx + .5); // hitx and hity contain (signed) fractional parts of cx and cy,
+                float hity = cy - floor(cy + .5); // they vary between -0.5 and +0.5, and one of them is supposed to be very close to 0
+                int x_texcoord = hitx * walltext_size;
+
+                // we need to determine whether we hit a "vertical" or a "horizontal" wall (w.r.t the map)
+                if (std::abs(hity) > std::abs(hitx)) x_texcoord = hity * walltext_size;
+                
+
+                if (x_texcoord < 0) x_texcoord += walltext_size; // do not forget x_texcoord can be negative, fix that
+                assert(x_texcoord >= 0 && x_texcoord < (int)walltext_size);
+
+                std::vector<uint32_t> column = texture_column(walltext, walltext_size, walltext_cnt, texid, x_texcoord, column_height);
+                pix_x = win_w / 2 + i;
+                for (size_t j = 0; j < column_height; j++) {
+                    pix_y = j + win_h / 2 - column_height / 2;
+                    if (pix_y < 0 || pix_y >= (int)win_h) continue;
+                    framebuffer[pix_x + pix_y * win_w] = column[j];
+                }
+
+                //draw_rectangle(framebuffer, win_w, win_h, win_w / 2 + i, win_h / 2 - column_height / 2, 1, column_height, walltext[texid * walltext_size]);
 
                 break;
             }
